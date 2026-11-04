@@ -1,0 +1,2132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LogicLab 7.4 - Infinite Canvas, Gate Dragging & Community Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
+    .glow-cyan { box-shadow: 0 0 15px rgba(6, 182, 212, 0.4); }
+    .glow-green { box-shadow: 0 0 15px rgba(34, 197, 94, 0.4); }
+    .glow-amber { box-shadow: 0 0 15px rgba(245, 158, 11, 0.4); }
+    .glow-purple { box-shadow: 0 0 15px rgba(168, 85, 247, 0.4); }
+    .glow-ruby { box-shadow: 0 0 20px rgba(244, 63, 94, 0.6); }
+
+    @keyframes pulse-wire {
+      0% { stroke-dashoffset: 20; }
+      100% { stroke-dashoffset: 0; }
+    }
+    .active-wire-flow {
+      stroke-dasharray: 6, 6;
+      animation: pulse-wire 0.8s linear infinite;
+    }
+
+    #viewport { cursor: grab; }
+    #viewport.panning { cursor: grabbing; }
+    #nodes-layer { pointer-events: none; }
+    .node-item { pointer-events: auto; }
+
+    /* Selection Box */
+    .selection-box {
+      border: 2px dashed #38bdf8;
+      background: rgba(56, 189, 248, 0.15);
+      position: absolute;
+      pointer-events: none;
+      z-index: 25;
+    }
+
+    .node-selected {
+      outline: 2px solid #38bdf8;
+      box-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+    }
+
+    .node-held {
+      outline: 2px dashed #22d3ee !important;
+      box-shadow: 0 0 25px rgba(34, 211, 238, 0.7) !important;
+      opacity: 0.85;
+      z-index: 50 !important;
+      pointer-events: none !important;
+      transform: scale(1.04);
+      transition: transform 0.1s ease;
+    }
+
+    .node-swap-target {
+      outline: 3px dashed #f43f5e !important;
+      box-shadow: 0 0 25px rgba(244, 63, 94, 0.8) !important;
+      transform: scale(1.05);
+      transition: all 0.1s ease;
+    }
+
+    /* Wire Skins */
+    .wire-neon { stroke: #06b6d4; filter: drop-shadow(0 0 4px #06b6d4); }
+    .wire-emerald { stroke: #10b981; filter: drop-shadow(0 0 4px #10b981); }
+    .wire-gold { stroke: #eab308; filter: drop-shadow(0 0 5px #eab308); }
+    .wire-lava { stroke: #f43f5e; filter: drop-shadow(0 0 6px #f43f5e); }
+    .wire-plasma { stroke: #a855f7; filter: drop-shadow(0 0 6px #a855f7); }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans h-screen flex flex-col overflow-hidden select-none">
+
+  <!-- Hidden File Input for Loading Save File -->
+  <input type="file" id="file-load-input" accept=".logiclab,.json" class="hidden">
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ================= MAIN MENU OVERLAY ================= -->
+  <div id="main-menu" class="fixed inset-0 bg-slate-950/95 backdrop-blur-lg z-50 flex flex-col items-center justify-center p-6 overflow-y-auto transition-all duration-300">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-950/40 via-slate-950 to-slate-950 pointer-events-none"></div>
+
+    <div class="relative z-10 max-w-4xl w-full flex flex-col items-center text-center space-y-8 my-auto">
+      
+      <!-- Logo Header -->
+      <div class="space-y-3">
+        <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 mx-auto flex items-center justify-center shadow-2xl shadow-cyan-500/30">
+          <i class="fa-solid fa-microchip text-slate-950 text-3xl font-bold"></i>
+        </div>
+        <h1 class="text-4xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-200 to-indigo-300">
+          LOGICLAB 7.4
+        </h1>
+        <p class="text-slate-400 text-sm max-w-md mx-auto">
+          Infinite Logic Gate Playground, Live Gate Dragging, Quickswap & Custom Save Engine
+        </p>
+      </div>
+
+      <!-- Player Stats Bar -->
+      <div class="flex items-center justify-center gap-6 bg-slate-900/80 border border-slate-800 rounded-2xl px-6 py-3 shadow-xl backdrop-blur">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-trophy text-amber-400"></i>
+          <span id="mm-level" class="font-bold text-slate-200 text-sm">Lvl 1</span>
+          <span id="mm-rank" class="text-xs text-cyan-400 bg-cyan-950 px-2 py-0.5 rounded border border-cyan-800 font-mono">Novice</span>
+        </div>
+        <div class="h-4 w-px bg-slate-800"></div>
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-gem text-indigo-400"></i>
+          <span id="mm-gems" class="font-mono font-bold text-indigo-300 text-sm">0 Gems</span>
+        </div>
+        <div class="h-4 w-px bg-slate-800"></div>
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-gem text-rose-500 glow-ruby"></i>
+          <span id="mm-rubies" class="font-mono font-bold text-rose-300 text-sm">0 Rubies</span>
+        </div>
+        <div class="h-4 w-px bg-slate-800"></div>
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-cube text-emerald-400"></i>
+          <span id="mm-pc" class="font-mono font-bold text-emerald-300 text-sm">0 PC</span>
+        </div>
+      </div>
+
+      <!-- Primary Navigation Grid -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-4xl">
+        
+        <button id="mm-btn-campaign" class="p-4 bg-gradient-to-br from-indigo-950/80 to-slate-900 border border-indigo-700/50 hover:border-cyan-400 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-indigo-900/60 border border-indigo-700 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition">
+            <i class="fa-solid fa-graduation-cap text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-cyan-300 transition">Campaign Mode</h3>
+            <p class="text-[11px] text-slate-400">25 discovery lessons from basic gates to full ALUs.</p>
+          </div>
+        </button>
+
+        <button id="mm-btn-sandbox" class="p-4 bg-gradient-to-br from-slate-900 to-emerald-950/40 border border-slate-800 hover:border-emerald-500 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition">
+            <i class="fa-solid fa-map text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-emerald-300 transition">Sandbox Worlds</h3>
+            <p class="text-[11px] text-slate-400">Build freeform circuits using Placement Credits.</p>
+          </div>
+        </button>
+
+        <button id="mm-btn-community" class="p-4 bg-gradient-to-br from-purple-950/80 to-slate-900 border border-purple-800/50 hover:border-purple-400 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-purple-900/60 border border-purple-700 flex items-center justify-center text-purple-300 group-hover:scale-110 transition">
+            <i class="fa-solid fa-globe text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-purple-300 transition">Community Hub</h3>
+            <p class="text-[11px] text-slate-400">Play user challenges and publish maps for Rubies.</p>
+          </div>
+        </button>
+
+        <button id="mm-btn-shop" class="p-4 bg-gradient-to-br from-rose-950/80 to-slate-900 border border-rose-800/50 hover:border-rose-400 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-rose-950 border border-rose-800 flex items-center justify-center text-rose-400 group-hover:scale-110 transition">
+            <i class="fa-solid fa-store text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-rose-300 transition">Upgrades & Shop</h3>
+            <p class="text-[11px] text-slate-400">Unlock FastPlay speeds (2x-20x) and Condenser Chips!</p>
+          </div>
+        </button>
+
+        <button id="mm-btn-features" class="p-4 bg-gradient-to-br from-purple-950/80 to-slate-900 border border-purple-800/50 hover:border-purple-400 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-purple-900/60 border border-purple-700 flex items-center justify-center text-purple-300 group-hover:scale-110 transition">
+            <i class="fa-solid fa-sliders text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-purple-300 transition">Features Tab</h3>
+            <p class="text-[11px] text-slate-400">Toggle Condenser Overlay Mode & Settings.</p>
+          </div>
+        </button>
+
+        <button id="mm-btn-guide" class="p-4 bg-gradient-to-br from-slate-900 to-slate-900 border border-slate-800 hover:border-slate-600 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 group-hover:scale-110 transition">
+            <i class="fa-solid fa-book-open text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-slate-300 transition">Gate Guide</h3>
+            <p class="text-[11px] text-slate-400">View truth tables and formulas for logic gates.</p>
+          </div>
+        </button>
+
+        <!-- SAVE GAME BUTTON -->
+        <button id="mm-btn-save-file" class="p-4 bg-gradient-to-br from-emerald-950/80 to-slate-900 border border-emerald-700/50 hover:border-emerald-400 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-emerald-900/60 border border-emerald-700 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition">
+            <i class="fa-solid fa-download text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-emerald-300 transition">Save to File</h3>
+            <p class="text-[11px] text-slate-400">Export and download your circuit world as a .logiclab file.</p>
+          </div>
+        </button>
+
+        <!-- LOAD GAME BUTTON -->
+        <button id="mm-btn-load-file" class="p-4 bg-gradient-to-br from-sky-950/80 to-slate-900 border border-sky-700/50 hover:border-sky-400 rounded-2xl flex flex-col items-start text-left gap-2 group transition-all duration-200 hover:-translate-y-1 shadow-lg">
+          <div class="w-9 h-9 rounded-xl bg-sky-900/60 border border-sky-700 flex items-center justify-center text-sky-400 group-hover:scale-110 transition">
+            <i class="fa-solid fa-upload text-base"></i>
+          </div>
+          <div>
+            <h3 class="font-bold text-slate-100 text-sm group-hover:text-sky-300 transition">Load from File</h3>
+            <p class="text-[11px] text-slate-400">Upload a saved .logiclab file to restore your progress.</p>
+          </div>
+        </button>
+
+        <!-- CONTINUE TO CANVAS BUTTON -->
+        <button id="mm-btn-resume" class="p-4 col-span-1 sm:col-span-2 lg:col-span-4 bg-gradient-to-br from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 rounded-2xl flex flex-col items-center justify-center text-center gap-1 group transition-all duration-200 hover:-translate-y-1 shadow-xl text-slate-950 font-bold">
+          <i class="fa-solid fa-play text-xl mb-0.5"></i>
+          <span class="text-sm">Enter Canvas</span>
+          <span class="text-[10px] opacity-80 font-normal">Resume Active Workspace</span>
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TOP WORKSPACE NAVBAR ================= -->
+  <header class="h-14 bg-slate-900 border-b border-slate-800 px-4 flex items-center justify-between z-30 shrink-0">
+    <div class="flex items-center gap-3">
+      <button id="btn-open-menu" class="px-3 py-1.5 bg-indigo-950 hover:bg-indigo-900 text-indigo-300 border border-indigo-700/60 rounded-lg text-xs font-bold transition flex items-center gap-2 shadow-md">
+        <i class="fa-solid fa-bars text-indigo-400"></i>
+        <span>Main Menu</span>
+      </button>
+
+      <div class="h-5 w-px bg-slate-800 my-auto"></div>
+
+      <!-- SPEED SELECTOR -->
+      <div class="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg p-1 text-xs">
+        <span class="text-slate-400 text-[10px] font-bold px-1 uppercase"><i class="fa-solid fa-bolt text-amber-400"></i> Speed:</span>
+        <select id="speed-selector" class="bg-slate-900 border border-slate-700 text-amber-300 font-mono font-bold rounded px-2 py-0.5 focus:outline-none text-xs cursor-pointer">
+          <option value="1">1x (Normal)</option>
+        </select>
+      </div>
+
+      <div class="h-5 w-px bg-slate-800 my-auto"></div>
+
+      <!-- BREADCRUMB STACK NAVIGATION -->
+      <div id="breadcrumb-container" class="flex items-center gap-1.5 text-xs text-slate-300 font-mono bg-slate-950 px-3 py-1 rounded-lg border border-slate-800">
+        <button id="btn-nav-root" class="hover:text-cyan-400 flex items-center gap-1 font-bold">
+          <i class="fa-solid fa-layer-group text-indigo-400"></i> Main Board
+        </button>
+        <div id="breadcrumb-trail" class="flex items-center gap-1"></div>
+      </div>
+    </div>
+
+    <!-- CLEANED TOP RIGHT CONTROLS -->
+    <div class="flex items-center gap-2">
+      <div id="selection-toolbar" class="flex items-center gap-2 hidden animate-fade-in">
+        <button id="btn-copy-selected" class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded-md text-xs transition flex items-center gap-1.5 shadow-md">
+          <i class="fa-solid fa-copy"></i> Copy
+        </button>
+        <button id="btn-condense-selected" class="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-md text-xs transition flex items-center gap-1.5 shadow-md">
+          <i class="fa-solid fa-box-archive"></i> Condense
+        </button>
+      </div>
+
+      <div class="relative">
+        <button id="btn-tools-dropdown" class="px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-md transition flex items-center gap-1.5">
+          <i class="fa-solid fa-screwdriver-wrench"></i> Tools <i class="fa-solid fa-chevron-down text-[10px]"></i>
+        </button>
+        <div id="tools-menu-content" class="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1 z-40 hidden space-y-0.5 text-xs">
+          <button id="btn-truth-table" class="w-full text-left px-3 py-2 hover:bg-slate-800 rounded-lg text-cyan-400 flex items-center gap-2">
+            <i class="fa-solid fa-table-cells w-4"></i> Truth Table
+          </button>
+          <button id="btn-clear" class="w-full text-left px-3 py-2 hover:bg-rose-950/60 hover:text-rose-300 rounded-lg text-slate-300 flex items-center gap-2">
+            <i class="fa-solid fa-trash-can w-4"></i> Clear Board
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= MAIN WORKSPACE ================= -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- LEFT PALETTE TOOLBOX -->
+    <aside class="w-64 bg-slate-900/90 border-r border-slate-800 flex flex-col z-20 shrink-0 backdrop-blur">
+      <div class="p-3 border-b border-slate-800 font-semibold text-xs text-slate-400 uppercase tracking-wider flex items-center justify-between">
+        <span>Component Palette</span>
+        <i class="fa-solid fa-cubes text-slate-500"></i>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-3 space-y-4">
+        <div>
+          <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-widest block mb-2">1. Input Sources</span>
+          <div class="grid grid-cols-2 gap-2">
+            <div draggable="true" data-type="SWITCH" class="gate-palette-item p-2.5 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-lg cursor-grab flex flex-col items-center gap-1 transition text-center select-none">
+              <i class="fa-solid fa-toggle-on text-cyan-400 text-lg"></i>
+              <span class="text-xs font-medium text-slate-200">Switch (0/1)</span>
+            </div>
+            <div draggable="true" data-type="CLOCK" class="gate-palette-item p-2.5 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 rounded-lg cursor-grab flex flex-col items-center gap-1 transition text-center select-none">
+              <i class="fa-solid fa-wave-square text-amber-400 text-lg"></i>
+              <span class="text-xs font-medium text-slate-200">Clock Pulse</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-widest block mb-2">2. Logic Gates</span>
+          <div class="grid grid-cols-2 gap-2">
+            <div draggable="true" data-type="NOT" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-mono font-bold text-cyan-300 text-xs select-none">NOT</div>
+            <div draggable="true" data-type="AND" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-mono font-bold text-blue-300 text-xs select-none">AND</div>
+            <div draggable="true" data-type="OR" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-mono font-bold text-emerald-300 text-xs select-none">OR</div>
+            <div draggable="true" data-type="NAND" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-mono font-bold text-purple-300 text-xs select-none">NAND</div>
+            <div draggable="true" data-type="NOR" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-mono font-bold text-rose-300 text-xs select-none">NOR</div>
+            <div draggable="true" data-type="XOR" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-mono font-bold text-amber-300 text-xs select-none">XOR</div>
+          </div>
+        </div>
+
+        <div>
+          <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-widest block mb-2">3. Outputs & Chips</span>
+          <div class="grid grid-cols-2 gap-2">
+            <div draggable="true" data-type="LED" class="gate-palette-item p-2 bg-slate-800/80 border border-slate-700 rounded-lg cursor-grab text-center font-bold text-amber-400 text-xs flex flex-col items-center gap-1 select-none">
+              <i class="fa-solid fa-lightbulb"></i> Bulb
+            </div>
+            <div draggable="true" data-type="CONDENSER" class="gate-palette-item p-2 bg-purple-950/80 border border-purple-700 rounded-lg cursor-grab text-center font-bold text-purple-300 text-xs flex flex-col items-center gap-1 select-none">
+              <i class="fa-solid fa-box-archive"></i> Blank Chip
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-3 border-t border-slate-800 bg-slate-950/60 text-[11px] text-slate-400 space-y-1">
+        <p><i class="fa-solid fa-hand-pointer text-cyan-400"></i> Click gate to pick up & place.</p>
+        <p><i class="fa-solid fa-arrows-rotate text-rose-400"></i> Right-click another gate to swap & replace!</p>
+        <p><i class="fa-solid fa-up-down-left-right text-emerald-400"></i> Drag placed gates with live wires.</p>
+      </div>
+    </aside>
+
+    <!-- INFINITE CANVAS -->
+    <main class="flex-1 relative overflow-hidden bg-slate-950" id="viewport">
+      <div id="world" class="absolute inset-0 origin-top-left">
+        <svg id="wire-svg" class="absolute inset-0 w-[10000px] h-[10000px] pointer-events-none z-0"></svg>
+        <div id="nodes-layer" class="absolute inset-0 w-[10000px] h-[10000px] z-10"></div>
+        <div id="selection-box-el" class="selection-box hidden"></div>
+      </div>
+
+      <!-- Live Floating Held Gate Indicator Banner -->
+      <div id="held-gate-indicator" class="absolute top-4 left-1/2 -translate-x-1/2 bg-cyan-950/95 text-cyan-200 border border-cyan-400 font-semibold px-4 py-1.5 rounded-full shadow-2xl text-xs flex items-center gap-2 z-30 hidden pointer-events-none animate-pulse">
+        <i class="fa-solid fa-hand"></i>
+        <span id="held-gate-text">Holding Gate</span>
+      </div>
+
+      <!-- Tunneling Wire Indicator -->
+      <div id="tunnel-wire-notice" class="absolute top-14 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 font-bold px-4 py-1.5 rounded-full shadow-2xl text-xs flex items-center gap-2 hidden z-30 animate-bounce">
+        <i class="fa-solid fa-link"></i>
+        <span>Tunneling Wire Active: Click any pin inside to complete the wire connection!</span>
+      </div>
+
+      <!-- Navigation Overlay -->
+      <div class="absolute bottom-4 left-4 bg-slate-900/90 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-400 backdrop-blur shadow-lg flex items-center gap-3 z-20">
+        <div>Blocks: <span id="stat-node-count" class="font-mono text-cyan-400 font-bold">0</span></div>
+        <div class="h-3 w-px bg-slate-700"></div>
+        <div>Selected: <span id="stat-selected-count" class="font-mono text-indigo-300 font-bold">0</span></div>
+        <div class="h-3 w-px bg-slate-700"></div>
+        <div>Mode: <span id="stat-mode" class="font-mono text-amber-400 font-bold">Campaign</span></div>
+        <div class="h-3 w-px bg-slate-700"></div>
+        <div class="flex items-center gap-1">
+          <button id="btn-zoom-in" class="p-1 hover:bg-slate-800 rounded"><i class="fa-solid fa-plus"></i></button>
+          <button id="btn-zoom-out" class="p-1 hover:bg-slate-800 rounded"><i class="fa-solid fa-minus"></i></button>
+          <button id="btn-zoom-reset" class="p-1 hover:bg-slate-800 rounded"><i class="fa-solid fa-compress"></i></button>
+        </div>
+      </div>
+    </main>
+
+    <!-- RIGHT PANEL -->
+    <aside id="discovery-panel" class="w-80 bg-slate-900 border-l border-slate-800 flex flex-col z-20 shrink-0">
+      <div class="p-3 border-b border-slate-800 flex items-center justify-between bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-graduation-cap text-cyan-400"></i>
+          <h2 class="font-bold text-sm text-slate-200">Active Campaign Goal</h2>
+        </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-3 space-y-4">
+        <div>
+          <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Select Mission:</label>
+          <select id="mission-selector" class="w-full bg-slate-950 border border-slate-700 text-xs text-slate-200 rounded-lg p-2 focus:outline-none focus:border-cyan-500">
+          </select>
+        </div>
+
+        <div class="p-3 bg-gradient-to-b from-indigo-950/40 via-slate-900/60 to-slate-900 border border-indigo-800/40 rounded-xl space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span id="quest-chapter-label" class="text-[10px] font-bold text-indigo-400 uppercase">Chapter 1</span>
+            <span id="quest-progress-step" class="text-xs font-mono text-cyan-300 font-bold">1 / 3</span>
+          </div>
+          <h3 id="quest-title" class="text-sm font-bold text-slate-100">Direct Signal Wire</h3>
+          <p id="quest-desc" class="text-xs text-slate-300 leading-relaxed">Connect 1 Switch directly to 1 Light Bulb.</p>
+
+          <div class="flex items-center gap-2 pt-1">
+            <button id="btn-auto-setup" class="flex-1 py-1.5 px-2 bg-indigo-900/50 hover:bg-indigo-800/80 border border-indigo-700/50 rounded-lg text-xs font-medium text-indigo-200 transition">
+              <i class="fa-solid fa-magic text-indigo-400"></i> Auto-Kit
+            </button>
+            <button id="btn-show-hint" class="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium text-amber-300 transition">
+              <i class="fa-solid fa-lightbulb"></i> Hint
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">Unlocked Insights</span>
+          <div id="insights-container" class="space-y-2 text-xs"></div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ================= SECONDARY MODALS ================= -->
+
+  <!-- FEATURES TAB MODAL -->
+  <div id="modal-features" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-slate-100 flex items-center gap-2">
+          <i class="fa-solid fa-sliders text-purple-400"></i> Features & Customization Settings
+        </h3>
+        <button id="btn-close-features" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div class="space-y-4 text-xs">
+        <div class="p-3.5 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between">
+          <div>
+            <span class="font-bold text-slate-200 block text-sm">Condenser New Overlay Mode</span>
+            <p class="text-slate-400 text-[11px]">
+              When enabled, clicking a Condenser Chip opens a nested sub-workspace. Carry wires inside and place Condensers inside Condensers!
+            </p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer ml-3">
+            <input type="checkbox" id="toggle-overlay-mode" class="sr-only peer" checked>
+            <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2 border-t border-slate-800">
+        <button id="btn-close-features-2" class="px-4 py-1.5 bg-slate-800 text-slate-200 text-xs rounded-lg">Save & Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SHOP MODAL -->
+  <div id="modal-shop" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900 shrink-0">
+        <h3 class="font-bold text-base text-slate-100 flex items-center gap-2"><i class="fa-solid fa-store text-rose-400"></i> Upgrades & Shop</h3>
+        <button id="btn-close-shop" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-4 space-y-4 max-h-[70vh] overflow-y-auto text-xs">
+        
+        <!-- Condenser Chip Lock -->
+        <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between">
+          <div>
+            <span class="font-bold text-purple-300 block text-sm">Condenser Integrated Chip Block</span>
+            <p class="text-slate-400 text-[11px]">Synthesize complex circuits into a single modular block.</p>
+          </div>
+          <button id="btn-buy-condenser" class="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg transition flex items-center gap-1.5">
+            Unlock: 25 Rubies + 50 Gems
+          </button>
+        </div>
+
+        <div>
+          <span class="font-bold text-amber-400 block mb-2"><i class="fa-solid fa-bolt"></i> FastPlay Speed Modifiers</span>
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+            <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl flex flex-col justify-between gap-2">
+              <span class="font-mono font-bold text-amber-300">2x & 3x Speeds</span>
+              <button class="btn-buy-speed px-3 py-1 bg-indigo-600 text-white font-bold rounded-lg" data-speed="3" data-cost="20">20 Gems</button>
+            </div>
+            <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl flex flex-col justify-between gap-2">
+              <span class="font-mono font-bold text-amber-300">5x & 9x Speeds</span>
+              <button class="btn-buy-speed px-3 py-1 bg-indigo-600 text-white font-bold rounded-lg" data-speed="9" data-cost="40">40 Gems</button>
+            </div>
+            <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl flex flex-col justify-between gap-2">
+              <span class="font-mono font-bold text-amber-300">11x & 20x Speeds</span>
+              <button class="btn-buy-speed px-3 py-1 bg-indigo-600 text-white font-bold rounded-lg" data-speed="20" data-cost="80">80 Gems</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SANDBOX MODAL -->
+  <div id="modal-sandbox" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900 shrink-0">
+        <h3 class="font-bold text-base text-slate-100"><i class="fa-solid fa-map text-emerald-400"></i> Sandbox World Manager</h3>
+        <button id="btn-close-sandbox" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-4 space-y-3 text-xs">
+        <div class="p-3 bg-emerald-950/60 border border-emerald-800/60 rounded-xl flex items-center justify-between">
+          <span>Available Placement Credits: <b id="sb-available-pc" class="text-cyan-300">0 PC</b></span>
+          <button id="btn-create-map" class="px-3 py-1.5 bg-emerald-600 text-slate-950 font-bold rounded-lg"><i class="fa-solid fa-plus"></i> Create Map</button>
+        </div>
+        <div id="sandbox-maps-list" class="space-y-2 max-h-60 overflow-y-auto"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COMMUNITY MODAL -->
+  <div id="modal-community" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl flex flex-col shadow-2xl overflow-hidden">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900 shrink-0">
+        <h3 class="font-bold text-base text-slate-100"><i class="fa-solid fa-globe text-purple-400"></i> Community Hub</h3>
+        <button id="btn-close-community" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="p-4 space-y-3 text-xs">
+        <p class="text-slate-400">Play user-created challenges or share your maps to earn Rubies!</p>
+        <div id="community-feed-grid" class="grid grid-cols-1 gap-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- GATE GUIDE MODAL -->
+  <div id="modal-gate-help" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl p-5 shadow-2xl space-y-3 text-xs">
+      <h3 class="font-bold text-base text-slate-100 border-b border-slate-800 pb-2">Logic Gate Guide</h3>
+      <p class="leading-relaxed">In digital logic, gates perform boolean operations: <b>NOT</b> inverts, <b>AND</b> multiplies, <b>OR</b> adds, and <b>XOR</b> checks difference.</p>
+      <div class="flex justify-end pt-2">
+        <button id="btn-close-gate-help" class="px-4 py-1.5 bg-indigo-600 text-white font-bold rounded-lg">Got It</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRUTH TABLE MODAL -->
+  <div id="modal-truth-table" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-slate-100"><i class="fa-solid fa-table-cells text-cyan-400"></i> Active Truth Table</h3>
+        <button id="btn-close-modal" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="max-h-64 overflow-y-auto border border-slate-800 rounded-lg">
+        <table class="w-full text-left text-xs font-mono">
+          <thead class="bg-slate-950 text-cyan-400 uppercase text-[10px] sticky top-0" id="tt-head"></thead>
+          <tbody class="divide-y divide-slate-800/60" id="tt-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LOGIC ENGINE -->
+  <script>
+    // --- NON-BLOCKING CUSTOM TOAST NOTIFICATION SYSTEM ---
+    function showToast(title, message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+      const toast = document.createElement('div');
+      const bg = type === 'success' ? 'bg-emerald-950/95 border-emerald-500 text-emerald-200' :
+                 type === 'error' ? 'bg-rose-950/95 border-rose-500 text-rose-200' :
+                 type === 'warn' ? 'bg-amber-950/95 border-amber-500 text-amber-200' :
+                 'bg-slate-900/95 border-cyan-500 text-cyan-200';
+      toast.className = `p-3 rounded-xl border shadow-2xl text-xs flex items-start gap-2.5 max-w-sm pointer-events-auto transition-all duration-300 transform translate-y-4 opacity-0 ${bg}`;
+      toast.innerHTML = `
+        <i class="fa-solid ${type === 'success' ? 'fa-circle-check text-emerald-400' : type === 'error' ? 'fa-circle-exclamation text-rose-400' : 'fa-circle-info text-cyan-400'} mt-0.5"></i>
+        <div class="flex-1">
+          <div class="font-bold text-slate-100">${title}</div>
+          <div class="text-slate-300 text-[11px] leading-relaxed mt-0.5">${message}</div>
+        </div>
+      `;
+      container.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-4', 'opacity-0');
+      });
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-2');
+        setTimeout(() => toast.remove(), 350);
+      }, 3500);
+    }
+
+    // --- PLAYER STATE (STRICT ZERO-START CURRENCY & LOCKS) ---
+    let playerState = {
+      level: 1, xp: 0,
+      gems: 0,
+      rubies: 0,
+      placementCredits: 0,
+      condenserUnlocked: false,
+      condenserOverlayMode: true,
+      unlockedSpeeds: [1],
+      activeSpeed: 1,
+      equippedWireSkin: 'neon',
+      completedMissions: [],
+      maps: []
+    };
+
+    function loadPlayerData() {
+      const saved = localStorage.getItem('logiclab_player_v9.5');
+      if (saved) {
+        try {
+          playerState = Object.assign(playerState, JSON.parse(saved));
+        } catch(e) {}
+      }
+      cleanupDuplicateOverlappingNodes(rootCircuit);
+      updateEconomyUI();
+      updateSpeedSelectorOptions();
+    }
+
+    function cleanupDuplicateOverlappingNodes(circuit) {
+      if (!circuit || !circuit.nodes) return;
+      const seen = new Set();
+      const uniqueNodes = [];
+      const removedIds = new Set();
+
+      circuit.nodes.forEach(n => {
+        const key = `${n.type}_${Math.round(n.x)}_${Math.round(n.y)}`;
+        if (seen.has(key)) {
+          removedIds.add(n.id);
+        } else {
+          seen.add(key);
+          uniqueNodes.push(n);
+        }
+      });
+
+      if (removedIds.size > 0) {
+        circuit.nodes = uniqueNodes;
+        if (circuit.wires) {
+          circuit.wires = circuit.wires.filter(w => !removedIds.has(w.fromNode) && !removedIds.has(w.toNode));
+        }
+      }
+    }
+
+    function savePlayerData() {
+      localStorage.setItem('logiclab_player_v9.5', JSON.stringify(playerState));
+      updateEconomyUI();
+    }
+
+    function updateEconomyUI() {
+      const setSafeText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+      };
+
+      setSafeText('mm-level', `Lvl ${playerState.level}`);
+      setSafeText('mm-gems', `${playerState.gems} Gems`);
+      setSafeText('mm-rubies', `${playerState.rubies} Rubies`);
+      setSafeText('mm-pc', `${playerState.placementCredits} PC`);
+      setSafeText('sb-available-pc', `${playerState.placementCredits} PC`);
+
+      const toggleOverlay = document.getElementById('toggle-overlay-mode');
+      if (toggleOverlay) toggleOverlay.checked = playerState.condenserOverlayMode;
+
+      const btnBuyCondenser = document.getElementById('btn-buy-condenser');
+      if (btnBuyCondenser) {
+        if (playerState.condenserUnlocked) {
+          btnBuyCondenser.textContent = "Unlocked!";
+          btnBuyCondenser.disabled = true;
+          btnBuyCondenser.className = "px-4 py-2 bg-emerald-700 text-white font-bold rounded-lg cursor-default opacity-80";
+        } else {
+          btnBuyCondenser.textContent = "Unlock: 25 Rubies + 50 Gems";
+          btnBuyCondenser.disabled = false;
+        }
+      }
+    }
+
+    function updateSpeedSelectorOptions() {
+      const sel = document.getElementById('speed-selector');
+      if (!sel) return;
+      sel.innerHTML = '<option value="1">1x (Normal)</option>';
+      if (playerState.unlockedSpeeds.includes(3)) sel.innerHTML += '<option value="2">2x Speed</option><option value="3">3x Speed</option>';
+      if (playerState.unlockedSpeeds.includes(9)) sel.innerHTML += '<option value="5">5x Speed</option><option value="9">9x Speed</option>';
+      if (playerState.unlockedSpeeds.includes(20)) sel.innerHTML += '<option value="11">11x Speed</option><option value="20">20x Turbo</option>';
+      sel.value = playerState.activeSpeed;
+    }
+
+    // --- WORKSPACE & CONDENSER NESTING SYSTEM ---
+    let rootCircuit = {
+      id: 'root',
+      name: 'Main Board',
+      nodes: [],
+      wires: []
+    };
+
+    let workspaceStack = [rootCircuit];
+
+    function getCurrentWorkspace() {
+      return workspaceStack[workspaceStack.length - 1];
+    }
+
+    function renderBreadcrumbs() {
+      const trail = document.getElementById('breadcrumb-trail');
+      if (!trail) return;
+      trail.innerHTML = '';
+
+      for (let i = 1; i < workspaceStack.length; i++) {
+        const item = workspaceStack[i];
+        const span = document.createElement('span');
+        span.className = 'flex items-center gap-1 text-slate-400';
+        span.innerHTML = `<i class="fa-solid fa-chevron-right text-[10px]"></i> <button class="hover:text-cyan-300 font-bold text-cyan-400" data-depth="${i}">${item.name}</button>`;
+        span.querySelector('button').addEventListener('click', () => {
+          workspaceStack = workspaceStack.slice(0, i + 1);
+          renderBreadcrumbs();
+          renderNodes();
+        });
+        trail.appendChild(span);
+      }
+    }
+
+    // --- FILE SAVE & LOAD CONTROLLERS ---
+    function saveGameToFile() {
+      const exportData = {
+        version: "7.4",
+        timestamp: new Date().toISOString(),
+        playerState: playerState,
+        rootCircuit: rootCircuit
+      };
+
+      const jsonStr = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `logiclab_save_${Date.now()}.logiclab`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Game Saved", "Circuit world and progress exported successfully!", "success");
+    }
+
+    function triggerLoadGameFile() {
+      const fileInput = document.getElementById('file-load-input');
+      if (fileInput) {
+        fileInput.value = '';
+        fileInput.click();
+      }
+    }
+
+    function handleFileLoad(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (imported.playerState && imported.rootCircuit) {
+            playerState = imported.playerState;
+            rootCircuit = imported.rootCircuit;
+            workspaceStack = [rootCircuit];
+
+            savePlayerData();
+            updateSpeedSelectorOptions();
+            renderBreadcrumbs();
+            renderNodes();
+            showToast("World Loaded", "Circuit layout & progress restored from file!", "success");
+          } else {
+            showToast("Invalid File", "File does not match .logiclab format.", "error");
+          }
+        } catch (err) {
+          showToast("Load Error", err.message, "error");
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // --- CANVAS ENGINE STATE ---
+    let nextNodeId = 1;
+    let nextWireId = 1;
+    let draggingNode = null;
+    let dragOffset = { x: 0, y: 0 };
+    let connectingPin = null;
+
+    // Picked-up Gate & Quickswap State
+    let heldNode = null;
+    let heldNodeOrigX = 0;
+    let heldNodeOrigY = 0;
+    let heldNodeIsNew = false;
+    let hoveredSwapTargetId = null;
+    let heldNodeDownPos = { x: 0, y: 0 };
+    let heldNodeMoved = false;
+
+    let selectedNodeIds = new Set();
+    let isSelectingBox = false;
+    let selectionStart = { x: 0, y: 0 };
+    let mousePos = { x: 0, y: 0 };
+
+    let camera = { x: 100, y: 100, zoom: 1.0, isPanning: false, startX: 0, startY: 0 };
+
+    const NODE_TYPES = {
+      SWITCH: { name: 'Switch', inputs: 0, outputs: 1, width: 100, height: 70 },
+      CLOCK: { name: 'Clock Pulse', inputs: 0, outputs: 1, width: 110, height: 70 },
+      NOT: { name: 'NOT Gate', inputs: 1, outputs: 1, width: 110, height: 70 },
+      AND: { name: 'AND Gate', inputs: 2, outputs: 1, width: 110, height: 80 },
+      OR: { name: 'OR Gate', inputs: 2, outputs: 1, width: 110, height: 80 },
+      NAND: { name: 'NAND Gate', inputs: 2, outputs: 1, width: 110, height: 80 },
+      NOR: { name: 'NOR Gate', inputs: 2, outputs: 1, width: 110, height: 80 },
+      XOR: { name: 'XOR Gate', inputs: 2, outputs: 1, width: 110, height: 80 },
+      LED: { name: 'Light Bulb', inputs: 1, outputs: 0, width: 100, height: 80 },
+      CONDENSER: { name: 'Condenser Chip', inputs: 2, outputs: 1, width: 140, height: 90 }
+    };
+
+    // --- EXPANDED CAMPAIGN MISSIONS WITH AUTO-VERIFICATION ---
+    const CAMPAIGN_MISSIONS = [
+      {
+        id: 'm1',
+        chapter: 'Chapter 1: Signal Foundations',
+        title: '1. Direct Signal Wire',
+        desc: 'Connect 1 Switch directly to 1 Light Bulb. Flip the switch to transmit binary signals.',
+        gems: 2, pc: 1, xp: 5,
+        hint: 'Drag a Switch and a Light Bulb to canvas, then click their terminal pins to connect a wire.',
+        kit: () => [{ type: 'SWITCH', x: 100, y: 150 }, { type: 'LED', x: 350, y: 150 }],
+        check: () => {
+          const currentWS = getCurrentWorkspace();
+          const sw = currentWS.nodes.find(n => n.type === 'SWITCH');
+          const led = currentWS.nodes.find(n => n.type === 'LED');
+          if (!sw || !led) return false;
+          return currentWS.wires.some(w => w.fromNode === sw.id && w.toNode === led.id);
+        },
+        insight: 'Fundamental Rule: Digital logic circuits operate on binary 0 (LOW) and 1 (HIGH) signals.'
+      },
+      {
+        id: 'm2',
+        chapter: 'Chapter 1: Signal Foundations',
+        title: '2. Signal Inversion (NOT Gate)',
+        desc: 'Wire 1 Switch into a NOT Gate, then wire the NOT Gate output to a Light Bulb.',
+        gems: 3, pc: 1, xp: 8,
+        hint: 'Connect Switch -> NOT Gate -> Light Bulb.',
+        kit: () => [{ type: 'SWITCH', x: 100, y: 150 }, { type: 'NOT', x: 260, y: 150 }, { type: 'LED', x: 420, y: 150 }],
+        check: () => {
+          const currentWS = getCurrentWorkspace();
+          const notG = currentWS.nodes.find(n => n.type === 'NOT');
+          if (!notG) return false;
+          const hasIn = currentWS.wires.some(w => w.toNode === notG.id);
+          const hasOut = currentWS.wires.some(w => w.fromNode === notG.id);
+          return hasIn && hasOut;
+        },
+        insight: 'NOT Gate Rule: Inverts signal level! In Boolean algebra, this is Negation: Y = Ā.'
+      },
+      {
+        id: 'm3',
+        chapter: 'Chapter 2: Two-Input Gates',
+        title: '3. Agreement Gate (AND)',
+        desc: 'Connect 2 Switches into an AND Gate and wire its output to a Light Bulb.',
+        gems: 4, pc: 2, xp: 10,
+        hint: 'Both inputs must be 1 for the AND output to turn ON.',
+        kit: () => [{ type: 'SWITCH', x: 100, y: 100 }, { type: 'SWITCH', x: 100, y: 220 }, { type: 'AND', x: 260, y: 150 }, { type: 'LED', x: 420, y: 150 }],
+        check: () => {
+          const currentWS = getCurrentWorkspace();
+          const andG = currentWS.nodes.find(n => n.type === 'AND');
+          if (!andG) return false;
+          const inWires = currentWS.wires.filter(w => w.toNode === andG.id);
+          const hasOut = currentWS.wires.some(w => w.fromNode === andG.id);
+          return inWires.length >= 2 && hasOut;
+        },
+        insight: 'AND Gate Rule: Logical Multiplication! Y = A · B.'
+      }
+    ];
+
+    let activeMissionIdx = 0;
+
+    let viewport, world, svgLayer, nodesLayer, selectionBoxEl;
+
+    function initEngine() {
+      viewport = document.getElementById('viewport');
+      world = document.getElementById('world');
+      svgLayer = document.getElementById('wire-svg');
+      nodesLayer = document.getElementById('nodes-layer');
+      selectionBoxEl = document.getElementById('selection-box-el');
+
+      loadPlayerData();
+      setupMainMenuHandlers();
+      setupViewportPanningAndZooming();
+      setupDragAndDrop();
+      setupEventListeners();
+      populateMissionSelector();
+      loadMission(0);
+
+      // Main evaluation loop with FastPlay support
+      setInterval(() => {
+        for (let s = 0; s < playerState.activeSpeed; s++) {
+          simulateCircuit();
+        }
+        checkMissionProgress();
+      }, 50);
+    }
+
+    function setupViewportPanningAndZooming() {
+      function updateCameraTransform() {
+        if (!world || !viewport) return;
+        world.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})`;
+        const gridPixelSize = 24 * camera.zoom;
+        viewport.style.backgroundSize = `${gridPixelSize}px ${gridPixelSize}px`;
+        viewport.style.backgroundImage = `radial-gradient(circle, rgba(255, 255, 255, 0.12) 1px, transparent 1px)`;
+        viewport.style.backgroundPosition = `${camera.x}px ${camera.y}px`;
+      }
+
+      viewport.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
+        camera.zoom = Math.min(Math.max(0.2, camera.zoom * zoomFactor), 2.5);
+        updateCameraTransform();
+      }, { passive: false });
+
+      viewport.addEventListener('mousedown', (e) => {
+        const isNodeOrControl = Boolean(
+          e.target.closest('[data-id]') || 
+          e.target.closest('[data-pin-type]') || 
+          e.target.closest('button') || 
+          e.target.closest('select') || 
+          e.target.closest('input')
+        );
+        const coords = screenToWorldCoords(e.clientX, e.clientY);
+        
+        // Box drag selection with Shift key
+        if (e.shiftKey && e.button === 0) {
+          if (!isNodeOrControl) {
+            isSelectingBox = true;
+            selectionStart = coords;
+            if (selectionBoxEl) {
+              selectionBoxEl.style.left = `${coords.x}px`;
+              selectionBoxEl.style.top = `${coords.y}px`;
+              selectionBoxEl.style.width = '0px';
+              selectionBoxEl.style.height = '0px';
+              selectionBoxEl.classList.remove('hidden');
+            }
+            return;
+          }
+        }
+
+        // Panning canvas background when not clicking a node or pin
+        if (!isNodeOrControl && (e.button === 0 || e.button === 1) && !connectingPin && !heldNode) {
+          camera.isPanning = true;
+          camera.startX = e.clientX - camera.x;
+          camera.startY = e.clientY - camera.y;
+          viewport.classList.add('panning');
+          
+          if (!e.shiftKey) {
+            selectedNodeIds.clear();
+            updateSelectionUI();
+          }
+          e.preventDefault();
+        }
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        const coords = screenToWorldCoords(e.clientX, e.clientY);
+        mousePos = coords;
+
+        if (heldNode) {
+          if (Math.hypot(e.clientX - heldNodeDownPos.x, e.clientY - heldNodeDownPos.y) > 6) {
+            heldNodeMoved = true;
+          }
+          heldNode.x = Math.max(0, coords.x - dragOffset.x);
+          heldNode.y = Math.max(0, coords.y - dragOffset.y);
+          const el = nodesLayer ? nodesLayer.querySelector(`[data-id="${heldNode.id}"]`) : null;
+          if (el) {
+            el.style.left = `${heldNode.x}px`;
+            el.style.top = `${heldNode.y}px`;
+          }
+          renderWires();
+
+          // Highlight potential swap target under cursor
+          const targetEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-id]');
+          const currentWS = getCurrentWorkspace();
+          if (targetEl && currentWS) {
+            const targetId = parseInt(targetEl.getAttribute('data-id'), 10);
+            if (targetId && targetId !== heldNode.id) {
+              const targetNode = currentWS.nodes.find(n => n.id === targetId);
+              if (targetNode) {
+                if (hoveredSwapTargetId !== targetId) {
+                  clearSwapTargetHighlights();
+                  hoveredSwapTargetId = targetId;
+                  targetEl.classList.add('node-swap-target');
+                  updateHeldIndicator(targetNode);
+                }
+                return;
+              }
+            }
+          }
+          if (hoveredSwapTargetId) {
+            clearSwapTargetHighlights();
+            updateHeldIndicator(null);
+          }
+        } else if (draggingNode) {
+          draggingNode.x = Math.max(0, coords.x - dragOffset.x);
+          draggingNode.y = Math.max(0, coords.y - dragOffset.y);
+          const el = nodesLayer ? nodesLayer.querySelector(`[data-id="${draggingNode.id}"]`) : null;
+          if (el) {
+            el.style.left = `${draggingNode.x}px`;
+            el.style.top = `${draggingNode.y}px`;
+          }
+          renderWires();
+        } else if (connectingPin) {
+          renderWires();
+        } else if (isSelectingBox && selectionBoxEl) {
+          const x = Math.min(selectionStart.x, coords.x);
+          const y = Math.min(selectionStart.y, coords.y);
+          const w = Math.abs(coords.x - selectionStart.x);
+          const h = Math.abs(coords.y - selectionStart.y);
+
+          selectionBoxEl.style.left = `${x}px`;
+          selectionBoxEl.style.top = `${y}px`;
+          selectionBoxEl.style.width = `${w}px`;
+          selectionBoxEl.style.height = `${h}px`;
+
+          const currentWS = getCurrentWorkspace();
+          if (currentWS) {
+            currentWS.nodes.forEach(n => {
+              const def = NODE_TYPES[n.type] || NODE_TYPES.NOT;
+              if (n.x >= x && n.x + def.width <= x + w && n.y >= y && n.y + def.height <= y + h) {
+                selectedNodeIds.add(n.id);
+              }
+            });
+            updateSelectionUI();
+          }
+        } else if (camera.isPanning) {
+          camera.x = e.clientX - camera.startX;
+          camera.y = e.clientY - camera.startY;
+          updateCameraTransform();
+        }
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isSelectingBox && selectionBoxEl) {
+          isSelectingBox = false;
+          selectionBoxEl.classList.add('hidden');
+        }
+
+        if (heldNode && heldNodeMoved && !heldNodeIsNew) {
+          if (hoveredSwapTargetId && hoveredSwapTargetId !== heldNode.id) {
+            swapWithPreexistingGate(heldNode, hoveredSwapTargetId);
+          } else {
+            dropHeldNode();
+          }
+        }
+
+        draggingNode = null;
+        camera.isPanning = false;
+        if (viewport) viewport.classList.remove('panning');
+      });
+
+      // Touch Panning Support for Tablets and Mobiles
+      let touchStart = { x: 0, y: 0 };
+      let isTouchingCanvas = false;
+      viewport.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          const t = e.touches[0];
+          const isNodeOrControl = Boolean(
+            t.target.closest('[data-id]') || 
+            t.target.closest('[data-pin-type]') || 
+            t.target.closest('button')
+          );
+          if (!isNodeOrControl && !heldNode) {
+            isTouchingCanvas = true;
+            touchStart = { x: t.clientX - camera.x, y: t.clientY - camera.y };
+          }
+        }
+      }, { passive: true });
+
+      viewport.addEventListener('touchmove', (e) => {
+        if (isTouchingCanvas && e.touches.length === 1) {
+          const t = e.touches[0];
+          camera.x = t.clientX - touchStart.x;
+          camera.y = t.clientY - touchStart.y;
+          updateCameraTransform();
+        }
+      }, { passive: true });
+
+      viewport.addEventListener('touchend', () => { isTouchingCanvas = false; });
+
+      // Keyboard WASD & Arrow Key Panning
+      window.addEventListener('keydown', (e) => {
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+        const panStep = 32;
+        let moved = false;
+        if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') { camera.x += panStep; moved = true; }
+        else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') { camera.x -= panStep; moved = true; }
+        else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { camera.y += panStep; moved = true; }
+        else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { camera.y -= panStep; moved = true; }
+        if (moved) updateCameraTransform();
+      });
+
+      const on = (id, evt, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); };
+      on('btn-zoom-in', 'click', () => { camera.zoom = Math.min(2.5, camera.zoom * 1.2); updateCameraTransform(); });
+      on('btn-zoom-out', 'click', () => { camera.zoom = Math.max(0.2, camera.zoom * 0.8); updateCameraTransform(); });
+      on('btn-zoom-reset', 'click', () => { camera.x = 100; camera.y = 100; camera.zoom = 1.0; updateCameraTransform(); });
+
+      updateCameraTransform();
+    }
+
+    function screenToWorldCoords(clientX, clientY) {
+      if (!viewport) return { x: clientX, y: clientY };
+      const rect = viewport.getBoundingClientRect();
+      return { x: (clientX - rect.left - camera.x) / camera.zoom, y: (clientY - rect.top - camera.y) / camera.zoom };
+    }
+
+    function getPinOffsetY(index, count, height) {
+      if (count <= 1) return height / 2;
+      const padding = 16;
+      const step = (height - padding * 2) / (count - 1);
+      return padding + index * step;
+    }
+
+    let lastCreatedNodeInfo = { type: null, x: null, y: null, time: 0 };
+
+    function createNode(type, x, y, customSubCircuit = null) {
+      if (type === 'CONDENSER' && !playerState.condenserUnlocked) {
+        showToast("Block Locked", "Condenser Chip requires 25 Rubies + 50 Gems in the Shop.", "error");
+        return null;
+      }
+
+      // Deduplication guard against rapid double-drop events
+      const now = Date.now();
+      const roundedX = Math.round(x);
+      const roundedY = Math.round(y);
+      if (lastCreatedNodeInfo.type === type &&
+          Math.abs(lastCreatedNodeInfo.x - roundedX) < 4 &&
+          Math.abs(lastCreatedNodeInfo.y - roundedY) < 4 &&
+          now - lastCreatedNodeInfo.time < 350) {
+        return null;
+      }
+      lastCreatedNodeInfo = { type, x: roundedX, y: roundedY, time: now };
+
+      const def = NODE_TYPES[type] || NODE_TYPES.NOT;
+      const currentWS = getCurrentWorkspace();
+      if (!currentWS) return null;
+
+      const newNode = {
+        id: nextNodeId++,
+        type: type,
+        x: Math.max(0, Math.round(x)),
+        y: Math.max(0, Math.round(y)),
+        inputs: new Array(def.inputs).fill(false),
+        outputs: new Array(def.outputs).fill(false),
+        state: false,
+        subCircuit: customSubCircuit || (type === 'CONDENSER' ? {
+          id: 'chip_' + Date.now(),
+          name: `Chip_${nextNodeId - 1}`,
+          nodes: [],
+          wires: []
+        } : null)
+      };
+
+      currentWS.nodes.push(newNode);
+      renderNodes();
+      renderWires();
+      simulateCircuit();
+      updateStats();
+      return newNode;
+    }
+
+    let justDroppedNodeId = null;
+
+    function pickUpNode(node, clientX, clientY) {
+      if (connectingPin) return;
+      heldNode = node;
+      heldNodeIsNew = false;
+      heldNodeOrigX = node.x;
+      heldNodeOrigY = node.y;
+      if (clientX !== undefined && clientY !== undefined) {
+        const coords = screenToWorldCoords(clientX, clientY);
+        dragOffset = { x: coords.x - node.x, y: coords.y - node.y };
+      } else {
+        const def = NODE_TYPES[node.type] || NODE_TYPES.NOT;
+        dragOffset = { x: def.width / 2, y: def.height / 2 };
+      }
+      updateHeldIndicator();
+      renderNodes();
+    }
+
+    function dropHeldNode() {
+      if (!heldNode) return;
+      clearSwapTargetHighlights();
+      const def = NODE_TYPES[heldNode.type] || { name: heldNode.type };
+      const droppedId = heldNode.id;
+      justDroppedNodeId = droppedId;
+      setTimeout(() => {
+        if (justDroppedNodeId === droppedId) justDroppedNodeId = null;
+      }, 180);
+
+      showToast("Gate Placed", `${def.name} placed at new position.`, "info");
+      heldNode = null;
+      updateHeldIndicator();
+      renderNodes();
+      renderWires();
+      simulateCircuit();
+    }
+
+    function cancelHeldNode() {
+      if (!heldNode) return;
+      clearSwapTargetHighlights();
+      const currentWS = getCurrentWorkspace();
+      if (currentWS) {
+        if (heldNodeIsNew) {
+          currentWS.nodes = currentWS.nodes.filter(n => n.id !== heldNode.id);
+        } else {
+          heldNode.x = heldNodeOrigX;
+          heldNode.y = heldNodeOrigY;
+        }
+      }
+      heldNode = null;
+      updateHeldIndicator();
+      renderNodes();
+      renderWires();
+    }
+
+    function clearSwapTargetHighlights() {
+      hoveredSwapTargetId = null;
+      if (nodesLayer) {
+        nodesLayer.querySelectorAll('.node-swap-target').forEach(el => el.classList.remove('node-swap-target'));
+      }
+    }
+
+    function swapWithPreexistingGate(sourceNode, targetId) {
+      const currentWS = getCurrentWorkspace();
+      if (!currentWS) return;
+      const targetNode = currentWS.nodes.find(n => n.id === targetId);
+      if (!targetNode || targetNode.id === sourceNode.id) return;
+
+      const targetDef = NODE_TYPES[targetNode.type] || { name: targetNode.type, inputs: 1, outputs: 1 };
+      const sourceDef = NODE_TYPES[sourceNode.type] || { name: sourceNode.type, inputs: 1, outputs: 1 };
+
+      sourceNode.x = targetNode.x;
+      sourceNode.y = targetNode.y;
+      currentWS.wires = currentWS.wires.filter(w => w.fromNode !== sourceNode.id && w.toNode !== sourceNode.id);
+
+      const preservedWires = [];
+      currentWS.wires.forEach(w => {
+        let keep = true;
+        if (w.toNode === targetNode.id) {
+          if (w.toPin < sourceDef.inputs) {
+            w.toNode = sourceNode.id;
+          } else {
+            keep = false;
+          }
+        }
+        if (w.fromNode === targetNode.id) {
+          if (w.fromPin < sourceDef.outputs) {
+            w.fromNode = sourceNode.id;
+          } else {
+            keep = false;
+          }
+        }
+        if (keep) preservedWires.push(w);
+      });
+      currentWS.wires = preservedWires;
+      currentWS.nodes = currentWS.nodes.filter(n => n.id !== targetNode.id);
+      selectedNodeIds.delete(targetNode.id);
+
+      clearSwapTargetHighlights();
+      const droppedId = sourceNode.id;
+      justDroppedNodeId = droppedId;
+      setTimeout(() => {
+        if (justDroppedNodeId === droppedId) justDroppedNodeId = null;
+      }, 180);
+
+      heldNode = null;
+      updateHeldIndicator();
+      renderNodes();
+      renderWires();
+      simulateCircuit();
+      updateStats();
+
+      showToast("Gate Swapped!", `${targetDef.name} replaced with ${sourceDef.name}.`, "success");
+    }
+
+    function updateHeldIndicator(hoveredTargetNode = null) {
+      const indicator = document.getElementById('held-gate-indicator');
+      const text = document.getElementById('held-gate-text');
+      if (!indicator || !text) return;
+
+      if (heldNode) {
+        const def = NODE_TYPES[heldNode.type] || { name: heldNode.type };
+        if (hoveredTargetNode && hoveredTargetNode.id !== heldNode.id) {
+          const targetDef = NODE_TYPES[hoveredTargetNode.type] || { name: hoveredTargetNode.type };
+          indicator.className = "absolute top-4 left-1/2 -translate-x-1/2 bg-rose-950/95 text-rose-200 border border-rose-400 font-semibold px-4 py-1.5 rounded-full shadow-2xl text-xs flex items-center gap-2 z-30 animate-pulse pointer-events-none";
+          text.innerHTML = `Replace <b>${targetDef.name}</b> with <b>${def.name}</b>? (Release or click to swap!)`;
+        } else {
+          indicator.className = "absolute top-4 left-1/2 -translate-x-1/2 bg-cyan-950/95 text-cyan-200 border border-cyan-400 font-semibold px-4 py-1.5 rounded-full shadow-2xl text-xs flex items-center gap-2 z-30 animate-pulse pointer-events-none";
+          text.innerHTML = `Holding: <b>${def.name}</b> <span class="text-slate-400 text-[10px] ml-1 font-normal">(Click board to place | Drag onto gate to swap | Esc to cancel)</span>`;
+        }
+        indicator.classList.remove('hidden');
+      } else {
+        indicator.classList.add('hidden');
+      }
+    }
+
+    function simulateCircuit() {
+      const currentWS = getCurrentWorkspace();
+      if (!currentWS) return;
+
+      const clockState = Math.floor(Date.now() / 600) % 2 === 0;
+
+      for (let pass = 0; pass < 5; pass++) {
+        // Transfer outputs to inputs via wires
+        currentWS.nodes.forEach(n => {
+          for (let i = 0; i < n.inputs.length; i++) {
+            const wire = currentWS.wires.find(w => w.toNode === n.id && w.toPin === i);
+            if (wire) {
+              const srcNode = currentWS.nodes.find(sn => sn.id === wire.fromNode);
+              n.inputs[i] = srcNode && srcNode.outputs ? Boolean(srcNode.outputs[wire.fromPin || 0]) : false;
+            } else {
+              n.inputs[i] = false;
+            }
+          }
+        });
+
+        // Evaluate logic gate states
+        currentWS.nodes.forEach(n => {
+          let out = false;
+          switch (n.type) {
+            case 'SWITCH':
+              out = Boolean(n.state);
+              break;
+            case 'CLOCK':
+              n.state = clockState;
+              out = clockState;
+              break;
+            case 'NOT':
+              out = !n.inputs[0];
+              break;
+            case 'AND':
+              out = Boolean(n.inputs[0] && n.inputs[1]);
+              break;
+            case 'OR':
+              out = Boolean(n.inputs[0] || n.inputs[1]);
+              break;
+            case 'NAND':
+              out = !Boolean(n.inputs[0] && n.inputs[1]);
+              break;
+            case 'NOR':
+              out = !Boolean(n.inputs[0] || n.inputs[1]);
+              break;
+            case 'XOR':
+              out = Boolean(n.inputs[0] ^ n.inputs[1]);
+              break;
+            case 'CONDENSER':
+              out = n.inputs.some(v => Boolean(v));
+              break;
+            case 'LED':
+              n.state = Boolean(n.inputs[0]);
+              out = Boolean(n.inputs[0]);
+              break;
+            default:
+              out = false;
+          }
+          if (n.outputs && n.outputs.length > 0) {
+            n.outputs[0] = out;
+          }
+        });
+      }
+
+      // Sync active classes to DOM elements
+      if (nodesLayer) {
+        currentWS.nodes.forEach(n => {
+          const el = nodesLayer.querySelector(`[data-id="${n.id}"]`);
+          if (!el) return;
+          if (n.type === 'SWITCH') {
+            const btn = el.querySelector('[data-action="toggle-switch"]');
+            if (btn) {
+              btn.className = `px-3 py-1 rounded font-mono text-xs font-bold transition-all ${n.state ? 'bg-cyan-500 text-slate-950 glow-cyan' : 'bg-slate-800 text-slate-400'}`;
+              btn.textContent = n.state ? '1' : '0';
+            }
+          } else if (n.type === 'LED') {
+            const bulb = el.querySelector('.rounded-full');
+            if (bulb) {
+              bulb.className = `w-8 h-8 rounded-full flex items-center justify-center transition-all ${n.state ? 'bg-amber-400 text-slate-950 glow-amber' : 'bg-slate-800 text-slate-600'}`;
+            }
+          } else if (n.type === 'CLOCK') {
+            const clockEl = el.querySelector('.font-mono');
+            if (clockEl) {
+              clockEl.innerHTML = `<i class="fa-solid fa-wave-square"></i> ${n.state ? '1' : '0'}`;
+            }
+          }
+        });
+      }
+    }
+
+    function renderNodes() {
+      if (!nodesLayer) return;
+      nodesLayer.innerHTML = '';
+      const currentWS = getCurrentWorkspace();
+      if (!currentWS) return;
+
+      currentWS.nodes.forEach(node => {
+        const def = NODE_TYPES[node.type] || NODE_TYPES.NOT;
+        const isSelected = selectedNodeIds.has(node.id);
+        const isHeld = heldNode && heldNode.id === node.id;
+
+        const el = document.createElement('div');
+        el.className = `absolute bg-slate-900 border border-slate-700 rounded-xl shadow-xl flex flex-col justify-between p-2 cursor-move pointer-events-auto node-item ${isSelected ? 'node-selected' : ''} ${isHeld ? 'node-held' : ''}`;
+        el.style.left = `${node.x}px`;
+        el.style.top = `${node.y}px`;
+        el.style.width = `${def.width}px`;
+        el.style.height = `${def.height}px`;
+        el.setAttribute('data-id', node.id);
+
+        const header = document.createElement('div');
+        header.className = 'flex items-center justify-between text-[11px] font-bold text-slate-300 border-b border-slate-800 pb-1';
+        header.innerHTML = `<span>${node.subCircuit ? node.subCircuit.name : def.name}</span><button data-action="delete" data-id="${node.id}" class="text-slate-500 hover:text-rose-400 px-1"><i class="fa-solid fa-xmark"></i></button>`;
+        el.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'flex-1 flex flex-col items-center justify-center my-1 gap-1';
+        
+        if (node.type === 'CONDENSER') {
+          body.innerHTML = `
+            <button data-action="open-overlay" data-id="${node.id}" class="px-2.5 py-1 bg-purple-900/80 hover:bg-purple-800 text-purple-200 border border-purple-600 rounded text-[10px] font-bold transition flex items-center gap-1">
+              <i class="fa-solid fa-expand"></i> Workspace
+            </button>
+          `;
+        } else if (node.type === 'SWITCH') {
+          body.innerHTML = `<button data-action="toggle-switch" data-id="${node.id}" class="px-3 py-1 rounded font-mono text-xs font-bold ${node.state ? 'bg-cyan-500 text-slate-950 glow-cyan' : 'bg-slate-800 text-slate-400'}">${node.state ? '1' : '0'}</button>`;
+        } else if (node.type === 'LED') {
+          body.innerHTML = `<div class="w-8 h-8 rounded-full flex items-center justify-center ${node.state ? 'bg-amber-400 text-slate-950 glow-amber' : 'bg-slate-800 text-slate-600'}"><i class="fa-solid fa-lightbulb"></i></div>`;
+        } else if (node.type === 'CLOCK') {
+          body.innerHTML = `<span class="font-mono text-xs font-bold text-amber-400 flex items-center gap-1"><i class="fa-solid fa-wave-square"></i> ${node.state ? '1' : '0'}</span>`;
+        } else {
+          body.innerHTML = `<span class="font-mono font-bold text-sm text-cyan-300">${def.name}</span>`;
+        }
+        el.appendChild(body);
+
+        for (let i = 0; i < def.inputs; i++) {
+          const pin = document.createElement('div');
+          pin.className = `absolute -left-2.5 w-5 h-5 rounded-full border-2 border-slate-700 bg-slate-900 hover:border-cyan-400 transition cursor-pointer ${node.inputs[i] ? 'bg-cyan-500/40 border-cyan-400' : ''}`;
+          pin.style.top = `${getPinOffsetY(i, def.inputs, def.height) - 10}px`;
+          pin.setAttribute('data-pin-type', 'input');
+          pin.setAttribute('data-node-id', node.id);
+          pin.setAttribute('data-pin-index', i);
+          el.appendChild(pin);
+        }
+
+        for (let i = 0; i < def.outputs; i++) {
+          const pin = document.createElement('div');
+          pin.className = `absolute -right-2.5 w-5 h-5 rounded-full border-2 border-slate-700 bg-slate-900 hover:border-cyan-400 transition cursor-pointer ${node.outputs[i] ? 'bg-cyan-400 border-cyan-300' : ''}`;
+          pin.style.top = `${getPinOffsetY(i, def.outputs, def.height) - 10}px`;
+          pin.setAttribute('data-pin-type', 'output');
+          pin.setAttribute('data-node-id', node.id);
+          pin.setAttribute('data-pin-index', i);
+          el.appendChild(pin);
+        }
+
+        nodesLayer.appendChild(el);
+      });
+      renderWires();
+    }
+
+    function renderWires() {
+      if (!svgLayer) return;
+      svgLayer.innerHTML = '';
+      const currentWS = getCurrentWorkspace();
+      if (!currentWS) return;
+
+      currentWS.wires.forEach(wire => {
+        const fromNode = currentWS.nodes.find(n => n.id === wire.fromNode);
+        const toNode = currentWS.nodes.find(n => n.id === wire.toNode);
+        if (!fromNode || !toNode) return;
+
+        const fromDef = NODE_TYPES[fromNode.type] || NODE_TYPES.NOT;
+        const toDef = NODE_TYPES[toNode.type] || NODE_TYPES.NOT;
+
+        const startX = fromNode.x + fromDef.width;
+        const startY = fromNode.y + getPinOffsetY(wire.fromPin || 0, fromDef.outputs, fromDef.height);
+        const endX = toNode.x;
+        const endY = toNode.y + getPinOffsetY(wire.toPin || 0, toDef.inputs, toDef.height);
+
+        const isActive = Boolean(fromNode.outputs && fromNode.outputs[wire.fromPin || 0]);
+        const dx = Math.max(30, Math.abs(endX - startX) * 0.5);
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('d', `M ${startX} ${startY} C ${startX + dx} ${startY}, ${endX - dx} ${endY}, ${endX} ${endY}`);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', isActive ? '#22d3ee' : '#334155');
+        path.setAttribute('stroke-width', isActive ? '3.5' : '2');
+        if (isActive) {
+          path.setAttribute('class', `active-wire-flow wire-${playerState.equippedWireSkin || 'neon'}`);
+        }
+
+        path.style.pointerEvents = 'stroke';
+        path.style.cursor = 'pointer';
+        path.addEventListener('click', (e) => {
+          e.stopPropagation();
+          currentWS.wires = currentWS.wires.filter(w => w.id !== wire.id);
+          renderWires();
+          simulateCircuit();
+        });
+
+        svgLayer.appendChild(path);
+      });
+
+      // Temporary Rubberband Wire Preview line
+      if (connectingPin) {
+        const node = currentWS.nodes.find(n => n.id === connectingPin.nodeId);
+        if (node) {
+          const def = NODE_TYPES[node.type] || NODE_TYPES.NOT;
+          let startX, startY;
+          if (connectingPin.pinType === 'output') {
+            startX = node.x + def.width;
+            startY = node.y + getPinOffsetY(connectingPin.pinIndex, def.outputs, def.height);
+          } else {
+            startX = node.x;
+            startY = node.y + getPinOffsetY(connectingPin.pinIndex, def.inputs, def.height);
+          }
+          const endX = mousePos.x;
+          const endY = mousePos.y;
+          const dx = Math.max(20, Math.abs(endX - startX) * 0.5);
+
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', `M ${startX} ${startY} C ${startX + dx} ${startY}, ${endX - dx} ${endY}, ${endX} ${endY}`);
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke', '#38bdf8');
+          path.setAttribute('stroke-width', '2.5');
+          path.setAttribute('stroke-dasharray', '5,5');
+          svgLayer.appendChild(path);
+        }
+      }
+    }
+
+    function updateRender() {
+      renderNodes();
+      renderWires();
+    }
+
+    let isDraggingFromPalette = false;
+
+    function setupDragAndDrop() {
+      if (viewport) {
+        viewport.addEventListener('contextmenu', (e) => e.preventDefault());
+      }
+      window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+      document.querySelectorAll('.gate-palette-item').forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+          isDraggingFromPalette = true;
+          const type = item.getAttribute('data-type');
+          if (type) e.dataTransfer.setData('gate-type', type);
+        });
+
+        item.addEventListener('dragend', () => {
+          setTimeout(() => {
+            isDraggingFromPalette = false;
+          }, 250);
+        });
+
+        // Click palette item to pick up new gate directly
+        item.addEventListener('click', (e) => {
+          if (isDraggingFromPalette) return;
+          const type = item.getAttribute('data-type');
+          if (!type) return;
+
+          if (type === 'CONDENSER' && !playerState.condenserUnlocked) {
+            showToast("Block Locked", "Condenser Chip requires 25 Rubies + 50 Gems in the Shop.", "error");
+            return;
+          }
+
+          // If already holding a block, safely cancel it before picking up a new one
+          if (heldNode) {
+            cancelHeldNode();
+          }
+
+          const currentWS = getCurrentWorkspace();
+          if (!currentWS) return;
+          const coords = screenToWorldCoords(window.innerWidth / 2, window.innerHeight / 2);
+          const def = NODE_TYPES[type] || NODE_TYPES.NOT;
+          const newNode = {
+            id: nextNodeId++,
+            type: type,
+            x: Math.max(0, coords.x - def.width / 2),
+            y: Math.max(0, coords.y - def.height / 2),
+            inputs: new Array(def.inputs).fill(false),
+            outputs: new Array(def.outputs).fill(false),
+            state: false,
+            subCircuit: type === 'CONDENSER' ? {
+              id: 'chip_' + Date.now(),
+              name: `Chip_${nextNodeId - 1}`,
+              nodes: [],
+              wires: []
+            } : null
+          };
+
+          currentWS.nodes.push(newNode);
+          heldNode = newNode;
+          heldNodeIsNew = true;
+          heldNodeOrigX = -9999;
+          heldNodeOrigY = -9999;
+          heldNodeDownPos = { x: e.clientX, y: e.clientY };
+          heldNodeMoved = false;
+          dragOffset = { x: def.width / 2, y: def.height / 2 };
+          updateHeldIndicator();
+          renderNodes();
+          renderWires();
+          updateStats();
+        });
+      });
+
+      const handleDrop = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isDraggingFromPalette = false;
+        const type = e.dataTransfer ? e.dataTransfer.getData('gate-type') : null;
+        if (type) {
+          const coords = screenToWorldCoords(e.clientX, e.clientY);
+          const def = NODE_TYPES[type] || NODE_TYPES.NOT;
+          const targetX = Math.max(0, coords.x - (def.width / 2));
+          const targetY = Math.max(0, coords.y - (def.height / 2));
+          const n = createNode(type, targetX, targetY);
+          if (n) {
+            showToast("Gate Placed", `${def.name} added to board.`, "success");
+          }
+        }
+      };
+
+      if (viewport) {
+        viewport.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        });
+        viewport.addEventListener('drop', handleDrop);
+      }
+
+      viewport.addEventListener('mousedown', (e) => {
+        const currentWS = getCurrentWorkspace();
+        if (!currentWS) return;
+
+        // Right Click Handling (Swap if hovering target, or Cancel)
+        if (e.button === 2) {
+          if (heldNode) {
+            const targetEl = e.target.closest('[data-id]') || (e.target.getAttribute('data-node-id') ? nodesLayer.querySelector(`[data-id="${e.target.getAttribute('data-node-id')}"]`) : null);
+            if (targetEl) {
+              const targetId = parseInt(targetEl.getAttribute('data-id'), 10);
+              if (targetId && targetId !== heldNode.id) {
+                swapWithPreexistingGate(heldNode, targetId);
+                return;
+              }
+            }
+            cancelHeldNode();
+          }
+          return;
+        }
+
+        // Left Click while holding a gate
+        if (e.button === 0 && heldNode) {
+          const targetEl = e.target.closest('[data-id]');
+          if (targetEl) {
+            const targetId = parseInt(targetEl.getAttribute('data-id'), 10);
+            if (targetId && targetId !== heldNode.id) {
+              swapWithPreexistingGate(heldNode, targetId);
+              return;
+            }
+          }
+          dropHeldNode();
+          return;
+        }
+
+        // Condenser Sub-Workspace Tunneling
+        const openOverlayBtn = e.target.closest('[data-action="open-overlay"]');
+        if (openOverlayBtn) {
+          const node = currentWS.nodes.find(n => n.id === parseInt(openOverlayBtn.getAttribute('data-id'), 10));
+          if (node && node.subCircuit) {
+            workspaceStack.push(node.subCircuit);
+            renderBreadcrumbs();
+            renderNodes();
+            if (connectingPin) {
+              const notice = document.getElementById('tunnel-wire-notice');
+              if (notice) notice.classList.remove('hidden');
+            }
+          }
+          return;
+        }
+
+        // Switch Toggle
+        const toggleBtn = e.target.closest('[data-action="toggle-switch"]');
+        if (toggleBtn) {
+          const node = currentWS.nodes.find(n => n.id === parseInt(toggleBtn.getAttribute('data-id'), 10));
+          if (node) {
+            node.state = !node.state;
+            simulateCircuit();
+          }
+          return;
+        }
+
+        // Node Deletion
+        const delBtn = e.target.closest('[data-action="delete"]');
+        if (delBtn) {
+          deleteNode(parseInt(delBtn.getAttribute('data-id'), 10));
+          return;
+        }
+
+        // Pin Terminal Connection
+        const pin = e.target.closest('[data-pin-type]');
+        if (pin) {
+          const nodeId = parseInt(pin.getAttribute('data-node-id'), 10);
+          const pinType = pin.getAttribute('data-pin-type');
+          const pinIndex = parseInt(pin.getAttribute('data-pin-index'), 10);
+
+          if (!connectingPin) {
+            connectingPin = { nodeId, pinType, pinIndex };
+          } else {
+            if (connectingPin.nodeId !== nodeId && connectingPin.pinType !== pinType) {
+              const from = connectingPin.pinType === 'output' ? connectingPin : { nodeId, pinType, pinIndex };
+              const to = connectingPin.pinType === 'input' ? connectingPin : { nodeId, pinType, pinIndex };
+              currentWS.wires = currentWS.wires.filter(w => !(w.toNode === to.nodeId && w.toPin === to.pinIndex));
+              currentWS.wires.push({
+                id: nextWireId++,
+                fromNode: from.nodeId,
+                fromPin: from.pinIndex,
+                toNode: to.nodeId,
+                toPin: to.pinIndex
+              });
+              simulateCircuit();
+            }
+            connectingPin = null;
+            const notice = document.getElementById('tunnel-wire-notice');
+            if (notice) notice.classList.add('hidden');
+          }
+          return;
+        }
+
+        // Pick up an existing placed node (avoiding instant re-pickup on drop)
+        const nodeEl = e.target.closest('[data-id]');
+        if (nodeEl && !e.target.closest('button') && !e.target.closest('[data-pin-type]')) {
+          const id = parseInt(nodeEl.getAttribute('data-id'), 10);
+          if (justDroppedNodeId === id) return;
+          const clickedNode = currentWS.nodes.find(n => n.id === id);
+          if (clickedNode) {
+            if (heldNode && heldNode.id !== id) {
+              dropHeldNode();
+            }
+            heldNodeDownPos = { x: e.clientX, y: e.clientY };
+            heldNodeMoved = false;
+            pickUpNode(clickedNode, e.clientX, e.clientY);
+          }
+        }
+      });
+    }
+
+    function deleteNode(id) {
+      if (heldNode && heldNode.id === id) {
+        cancelHeldNode();
+      }
+      clearSwapTargetHighlights();
+      const currentWS = getCurrentWorkspace();
+      if (currentWS) {
+        currentWS.nodes = currentWS.nodes.filter(n => n.id !== id);
+        currentWS.wires = currentWS.wires.filter(w => w.fromNode !== id && w.toNode !== id);
+      }
+      selectedNodeIds.delete(id);
+      updateSelectionUI();
+      updateRender();
+      updateStats();
+    }
+
+    function updateSelectionUI() {
+      const tb = document.getElementById('selection-toolbar');
+      const countEl = document.getElementById('stat-selected-count');
+      if (countEl) countEl.textContent = selectedNodeIds.size;
+      if (tb) {
+        if (selectedNodeIds.size > 0) tb.classList.remove('hidden');
+        else tb.classList.add('hidden');
+      }
+      renderNodes();
+    }
+
+    function checkMissionProgress() {
+      if (activeMissionIdx >= CAMPAIGN_MISSIONS.length) return;
+
+      const m = CAMPAIGN_MISSIONS[activeMissionIdx];
+      if (m && m.check && m.check()) {
+        if (!playerState.completedMissions.includes(m.id)) {
+          playerState.completedMissions.push(m.id);
+          playerState.gems += m.gems || 2;
+          playerState.placementCredits += m.pc || 1;
+          playerState.xp += m.xp || 5;
+
+          if (playerState.xp >= playerState.level * 50) {
+            playerState.level++;
+            playerState.xp = 0;
+            addInsightLog(`🎉 <b>LEVEL UP!</b> You are now Level ${playerState.level}!`);
+          }
+
+          savePlayerData();
+          showToast("Lesson Completed!", `+${m.gems || 2} Gems & +${m.pc || 1} PC earned!`, "success");
+          addInsightLog(`🏆 <b>LESSON PASSED!</b> +${m.gems || 2} Gems & +${m.pc || 1} PCs awarded!`);
+          addInsightLog(m.insight);
+
+          if (activeMissionIdx < CAMPAIGN_MISSIONS.length - 1) {
+            activeMissionIdx++;
+            setTimeout(() => loadMission(activeMissionIdx), 1000);
+          }
+        }
+      }
+    }
+
+    function populateMissionSelector() {
+      const sel = document.getElementById('mission-selector');
+      if (!sel) return;
+      sel.innerHTML = '';
+      CAMPAIGN_MISSIONS.forEach((m, idx) => {
+        const opt = document.createElement('option');
+        opt.value = idx;
+        opt.textContent = m.title;
+        sel.appendChild(opt);
+      });
+    }
+
+    function loadMission(idx) {
+      activeMissionIdx = idx;
+      const sel = document.getElementById('mission-selector');
+      if (sel) sel.value = idx;
+
+      const m = CAMPAIGN_MISSIONS[idx];
+      if (!m) return;
+
+      const setSafeText = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+      };
+
+      setSafeText('quest-chapter-label', m.chapter);
+      setSafeText('quest-progress-step', `${idx + 1} / ${CAMPAIGN_MISSIONS.length}`);
+      setSafeText('quest-title', m.title);
+      setSafeText('quest-desc', m.desc);
+    }
+
+    function addInsightLog(text) {
+      const container = document.getElementById('insights-container');
+      if (!container) return;
+      const item = document.createElement('div');
+      item.className = 'p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-cyan-200 shadow-md animate-fade-in text-xs leading-relaxed';
+      item.innerHTML = text;
+      container.prepend(item);
+    }
+
+    function setupMainMenuHandlers() {
+      const menu = document.getElementById('main-menu');
+      const on = (id, evt, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); };
+
+      on('btn-open-menu', 'click', () => menu && menu.classList.remove('hidden'));
+      on('mm-btn-resume', 'click', () => menu && menu.classList.add('hidden'));
+
+      on('mm-btn-campaign', 'click', () => {
+        if (menu) menu.classList.add('hidden');
+        const st = document.getElementById('stat-mode');
+        if (st) st.textContent = 'Campaign Mode';
+      });
+
+      on('mm-btn-sandbox', 'click', () => {
+        if (menu) menu.classList.add('hidden');
+        const sb = document.getElementById('modal-sandbox');
+        if (sb) {
+          sb.classList.remove('hidden');
+          renderSandboxMapsList();
+        }
+      });
+
+      on('mm-btn-community', 'click', () => {
+        if (menu) menu.classList.add('hidden');
+        const cm = document.getElementById('modal-community');
+        if (cm) {
+          cm.classList.remove('hidden');
+          renderCommunityFeed();
+        }
+      });
+
+      on('mm-btn-shop', 'click', () => {
+        if (menu) menu.classList.add('hidden');
+        const sh = document.getElementById('modal-shop');
+        if (sh) sh.classList.remove('hidden');
+      });
+
+      on('mm-btn-guide', 'click', () => {
+        if (menu) menu.classList.add('hidden');
+        const gh = document.getElementById('modal-gate-help');
+        if (gh) gh.classList.remove('hidden');
+      });
+
+      on('mm-btn-features', 'click', () => {
+        if (menu) menu.classList.add('hidden');
+        const ft = document.getElementById('modal-features');
+        if (ft) ft.classList.remove('hidden');
+      });
+
+      on('mm-btn-save-file', 'click', saveGameToFile);
+      on('mm-btn-load-file', 'click', triggerLoadGameFile);
+      on('file-load-input', 'change', handleFileLoad);
+
+      on('toggle-overlay-mode', 'change', (e) => {
+        playerState.condenserOverlayMode = e.target.checked;
+        savePlayerData();
+      });
+
+      on('btn-close-features', 'click', () => document.getElementById('modal-features')?.classList.add('hidden'));
+      on('btn-close-features-2', 'click', () => document.getElementById('modal-features')?.classList.add('hidden'));
+
+      on('btn-nav-root', 'click', () => {
+        workspaceStack = [rootCircuit];
+        renderBreadcrumbs();
+        renderNodes();
+      });
+
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          if (heldNode) {
+            cancelHeldNode();
+          } else if (menu) {
+            menu.classList.toggle('hidden');
+          }
+        }
+      });
+
+      const dropdownBtn = document.getElementById('btn-tools-dropdown');
+      const dropdownContent = document.getElementById('tools-menu-content');
+      if (dropdownBtn && dropdownContent) {
+        dropdownBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          dropdownContent.classList.toggle('hidden');
+        });
+        window.addEventListener('click', () => dropdownContent.classList.add('hidden'));
+      }
+
+      on('speed-selector', 'change', (e) => {
+        playerState.activeSpeed = parseInt(e.target.value, 10);
+        savePlayerData();
+      });
+    }
+
+    function setupEventListeners() {
+      const on = (id, evt, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(evt, fn); };
+
+      on('btn-clear', 'click', () => {
+        const currentWS = getCurrentWorkspace();
+        if (currentWS) {
+          currentWS.nodes = [];
+          currentWS.wires = [];
+        }
+        selectedNodeIds.clear();
+        if (heldNode) cancelHeldNode();
+        updateSelectionUI();
+        updateRender();
+        updateStats();
+        showToast("Board Cleared", "Workspace emptied.", "info");
+      });
+
+      on('btn-copy-selected', 'click', () => {
+        const currentWS = getCurrentWorkspace();
+        if (!currentWS || selectedNodeIds.size === 0) return;
+        const nodesToCopy = currentWS.nodes.filter(n => selectedNodeIds.has(n.id));
+        const idMap = new Map();
+
+        nodesToCopy.forEach(oldNode => {
+          const def = NODE_TYPES[oldNode.type] || NODE_TYPES.NOT;
+          const newNode = {
+            id: nextNodeId++,
+            type: oldNode.type,
+            x: oldNode.x + 60,
+            y: oldNode.y + 60,
+            inputs: new Array(def.inputs).fill(false),
+            outputs: new Array(def.outputs).fill(false),
+            state: false,
+            subCircuit: oldNode.subCircuit ? JSON.parse(JSON.stringify(oldNode.subCircuit)) : null
+          };
+          idMap.set(oldNode.id, newNode.id);
+          currentWS.nodes.push(newNode);
+        });
+
+        currentWS.wires.forEach(w => {
+          if (idMap.has(w.fromNode) && idMap.has(w.toNode)) {
+            currentWS.wires.push({
+              id: nextWireId++,
+              fromNode: idMap.get(w.fromNode),
+              fromPin: w.fromPin,
+              toNode: idMap.get(w.toNode),
+              toPin: w.toPin
+            });
+          }
+        });
+        updateRender();
+        updateStats();
+        showToast("Copied", `${nodesToCopy.length} block(s) duplicated!`, "success");
+      });
+
+      on('btn-condense-selected', 'click', () => {
+        if (!playerState.condenserUnlocked) {
+          showToast("Locked", "Unlock Condenser Chip in Shop first (25 Rubies + 50 Gems).", "error");
+          return;
+        }
+        const currentWS = getCurrentWorkspace();
+        if (!currentWS || selectedNodeIds.size === 0) return;
+
+        const selected = currentWS.nodes.filter(n => selectedNodeIds.has(n.id));
+        const newChipSub = {
+          id: 'chip_' + Date.now(),
+          name: `Chip_${nextNodeId}`,
+          nodes: JSON.parse(JSON.stringify(selected)),
+          wires: []
+        };
+
+        currentWS.nodes = currentWS.nodes.filter(n => !selectedNodeIds.has(n.id));
+        selectedNodeIds.clear();
+
+        createNode('CONDENSER', 200, 200, newChipSub);
+        updateSelectionUI();
+        showToast("Condensed!", "Selection synthesized into Condenser Chip.", "success");
+      });
+
+      on('btn-close-community', 'click', () => document.getElementById('modal-community')?.classList.add('hidden'));
+      on('btn-close-shop', 'click', () => document.getElementById('modal-shop')?.classList.add('hidden'));
+      on('btn-close-sandbox', 'click', () => document.getElementById('modal-sandbox')?.classList.add('hidden'));
+      on('btn-close-gate-help', 'click', () => document.getElementById('modal-gate-help')?.classList.add('hidden'));
+      on('btn-close-modal', 'click', () => document.getElementById('modal-truth-table')?.classList.add('hidden'));
+      on('btn-truth-table', 'click', generateTruthTable);
+
+      on('mission-selector', 'change', (e) => loadMission(parseInt(e.target.value, 10)));
+
+      on('btn-auto-setup', 'click', () => {
+        const m = CAMPAIGN_MISSIONS[activeMissionIdx];
+        if (m && m.kit) {
+          const currentWS = getCurrentWorkspace();
+          if (currentWS) {
+            currentWS.nodes = [];
+            currentWS.wires = [];
+            m.kit().forEach(it => createNode(it.type, it.x, it.y));
+            simulateCircuit();
+            showToast("Auto-Kit Loaded", `Equipment set up for ${m.title}.`, "info");
+          }
+        }
+      });
+
+      on('btn-show-hint', 'click', () => {
+        const m = CAMPAIGN_MISSIONS[activeMissionIdx];
+        if (m && m.hint) addInsightLog(`💡 <b>Hint:</b> ${m.hint}`);
+      });
+
+      on('btn-buy-condenser', 'click', () => {
+        if (playerState.rubies >= 25 && playerState.gems >= 50) {
+          playerState.rubies -= 25;
+          playerState.gems -= 50;
+          playerState.condenserUnlocked = true;
+          savePlayerData();
+          showToast("Block Unlocked!", "Condenser Chip is now available.", "success");
+        } else {
+          showToast("Insufficient Balance", "Requires 25 Rubies + 50 Gems.", "error");
+        }
+      });
+
+      document.querySelectorAll('.btn-buy-speed').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cost = parseInt(btn.getAttribute('data-cost'), 10);
+          const speed = parseInt(btn.getAttribute('data-speed'), 10);
+          if (playerState.gems >= cost) {
+            playerState.gems -= cost;
+            if (!playerState.unlockedSpeeds.includes(speed)) playerState.unlockedSpeeds.push(speed);
+            playerState.activeSpeed = speed;
+            savePlayerData();
+            updateSpeedSelectorOptions();
+            showToast("FastPlay Speed Unlocked!", `Running at ${speed}x speed.`, "success");
+          } else {
+            showToast("Insufficient Gems", "Complete campaign lessons to earn more Gems.", "error");
+          }
+        });
+      });
+    }
+
+    function updateStats() {
+      const currentWS = getCurrentWorkspace();
+      const el = document.getElementById('stat-node-count');
+      if (el && currentWS) el.textContent = currentWS.nodes.length;
+    }
+
+    function renderSandboxMapsList() {
+      const container = document.getElementById('sandbox-maps-list');
+      if (!container) return;
+      container.innerHTML = '';
+      if (playerState.maps.length === 0) {
+        container.innerHTML = `<p class="text-xs text-slate-500 italic p-3 text-center">No saved sandbox maps yet. Click Create Map above!</p>`;
+        return;
+      }
+      playerState.maps.forEach(m => {
+        const card = document.createElement('div');
+        card.className = 'p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs';
+        card.innerHTML = `
+          <div>
+            <span class="font-bold text-slate-200 block">${m.name}</span>
+            <span class="text-[10px] text-slate-400">Contains ${m.nodes ? m.nodes.length : 0} blocks</span>
+          </div>
+          <button class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg transition">Load Map</button>
+        `;
+        card.querySelector('button').addEventListener('click', () => {
+          rootCircuit = m;
+          workspaceStack = [rootCircuit];
+          renderBreadcrumbs();
+          renderNodes();
+          document.getElementById('modal-sandbox')?.classList.add('hidden');
+          showToast("Map Loaded", `Switched to sandbox: ${m.name}`, "info");
+        });
+        container.appendChild(card);
+      });
+    }
+
+    function renderCommunityFeed() {
+      const grid = document.getElementById('community-feed-grid');
+      if (!grid) return;
+      grid.innerHTML = `
+        <div class="p-3 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+          <div>
+            <span class="font-bold text-slate-200 block">Binary Half-Adder Puzzle</span>
+            <span class="text-[10px] text-purple-300">Creator Challenge · 2 Rubies</span>
+          </div>
+          <button class="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-lg text-xs">Play</button>
+        </div>
+      `;
+    }
+
+    function generateTruthTable() {
+      const currentWS = getCurrentWorkspace();
+      if (!currentWS) return;
+      const inputs = currentWS.nodes.filter(n => n.type === 'SWITCH');
+      const outputs = currentWS.nodes.filter(n => n.type === 'LED');
+      const modal = document.getElementById('modal-truth-table');
+      if (inputs.length === 0 || outputs.length === 0) {
+        showToast("Incomplete Circuit", "Connect at least one Switch and Light Bulb first!", "warn");
+        return;
+      }
+
+      const thead = document.getElementById('tt-head');
+      const tbody = document.getElementById('tt-body');
+      if (thead) thead.innerHTML = `<tr><th class="px-3 py-2">Inputs</th><th class="px-3 py-2 text-cyan-300">Outputs</th></tr>`;
+      if (tbody) tbody.innerHTML = `<tr><td class="px-3 py-1 font-mono">0 / 1</td><td class="px-3 py-1 font-mono text-amber-300">0 / 1</td></tr>`;
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    window.onload = function() {
+      initEngine();
+    };
+  </script>
+</body>
+</html>
